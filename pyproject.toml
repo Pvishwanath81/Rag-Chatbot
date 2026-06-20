@@ -8,9 +8,9 @@ license = {text = "MIT"}
 authors = [{name = "Your Name", email = "your.email@example.com"}]
 
 dependencies = [
-    "streamlit==1.45.1",
-    "langchain==0.3.25",
-    "langchain-community==0.3.24",
+    "streamlit==1.54.0",
+    "langchain==0.3.27",
+    "langchain-community==0.3.27",
     "langchain-huggingface==0.1.2",
     "langchain-ollama==0.3.3",
     "langchain-google-genai==2.1.4",
@@ -22,6 +22,8 @@ dependencies = [
     "pymupdf4llm==0.0.17",
     "pymupdf==1.25.5",
     "python-dotenv==1.2.2",
+    "pillow==12.2.0",
+    "langsmith==0.8.18",
 ]
 
 dev-dependencies = [
@@ -56,3 +58,10 @@ addopts = "-v --tb=short"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pip-audit>=2.10.1",
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.1",
+]
