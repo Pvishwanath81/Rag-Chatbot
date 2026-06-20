@@ -1,0 +1,55 @@
+[project]
+name = "streamlit-rag-chatbot"
+version = "0.1.0"
+description = "A Streamlit RAG chatbot application"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Your Name", email = "your.email@example.com"}]
+
+dependencies = [
+    "streamlit==1.45.1",
+    "langchain==0.3.25",
+    "langchain-community==0.3.24",
+    "langchain-huggingface==0.1.2",
+    "langchain-ollama==0.3.3",
+    "langchain-google-genai==2.1.4",
+    "langchain-openai==0.3.16",
+    "langchain-anthropic==0.3.12",
+    "langchain-groq==0.2.5",
+    "faiss-cpu==1.11.0",
+    "sentence-transformers==4.1.0",
+    "pymupdf4llm==0.0.17",
+    "pymupdf==1.25.5",
+    "python-dotenv==1.1.0",
+]
+
+dev-dependencies = [
+    "mypy>=1.10.0",
+    "ruff>=0.6.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pre-commit>=3.6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
