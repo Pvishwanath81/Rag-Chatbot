@@ -1,0 +1,15 @@
+stages:
+  - test
+
+test:
+  stage: test
+  image: python:3.12
+
+  before_script:
+    - pip install uv
+    - uv sync
+
+  script:
+    - uv run ruff check .
+    - uv run mypy .
+    - uv run pytest

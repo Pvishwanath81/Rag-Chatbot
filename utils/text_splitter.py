@@ -22,6 +22,7 @@ Public API is unchanged from the original version:
   - get_chunk_stats(chunks) -> dict
 """
 
+from typing import Any, cast
 from langchain.text_splitter import MarkdownTextSplitter
 
 
@@ -57,7 +58,7 @@ def split_documents(
         chunk_overlap=chunk_overlap,
     )
 
-    chunks = splitter.split_documents(documents)
+    chunks = cast(list[Any], splitter.split_documents(documents))
 
     if not chunks:
         raise ValueError(
