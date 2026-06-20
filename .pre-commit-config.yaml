@@ -28,6 +28,12 @@ repos:
   hooks:
     - id: pip-audit
       name: pip-audit
-      entry: pip-audit
+      entry: uv run pip-audit
       language: system
       pass_filenames: false
+
+- repo: https://github.com/PyCQA/bandit
+  rev: 1.8.3
+  hooks:
+    - id: bandit
+      args: ["-c", "pyproject.toml"]
