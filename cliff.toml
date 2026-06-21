@@ -1,0 +1,8 @@
+[changelog]
+header = "# Changelog"
+
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% endfor %}
+"""
