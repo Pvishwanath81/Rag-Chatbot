@@ -7,34 +7,35 @@ stages:
 
 before_script:
   - pip install uv
-  - uv sync
 
 lint:
-  image: python:3.12
   stage: lint
+  image: python:3.12
   script:
     - uvx ruff check .
 
 format:
-  image: python:3.12
   stage: format
+  image: python:3.12
   script:
     - uvx ruff format --check .
 
 type_check:
-  image: python:3.12
   stage: type_check
+  image: python:3.12
   script:
-    - uv run mypy .
+    - uvx mypy .
 
 test:
-  image: python:3.12
   stage: test
+  image: python:3.12
   script:
-    - uv run pytest
+    - pip install pytest
+    - pytest
 
 coverage:
-  image: python:3.12
   stage: coverage
+  image: python:3.12
   script:
-    - uv run pytest --cov=. --cov-report=xml
+    - pip install pytest pytest-cov
+    - pytest --cov=. --cov-report=xml
