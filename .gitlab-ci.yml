@@ -30,12 +30,12 @@ test:
   stage: test
   image: python:3.12
   script:
-    - pip install pytest
+    - pip install pytest langchain
     - pytest
 
 coverage:
   stage: coverage
   image: python:3.12
   script:
-    - pip install pytest pytest-cov
+    - pip install pytest pytest-cov langchain
     - pytest --cov=. --cov-report=xml
