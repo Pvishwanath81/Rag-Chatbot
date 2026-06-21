@@ -19,14 +19,17 @@ Public API is unchanged:
 """
 
 from langchain_ollama import ChatOllama
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains.conversational_retrieval.base import (
+    ConversationalRetrievalChain,
+)
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 
 
 # ----- Prompt Template --------------------------------------------------------
 
-RAG_PROMPT_TEMPLATE = """You are a helpful assistant that answers questions based strictly
+RAG_PROMPT_TEMPLATE = """You are a helpful assistant
+that answers questions based strictly
 on the provided document context. If the answer is not in the context, say:
 "I couldn't find that information in the uploaded document."
 

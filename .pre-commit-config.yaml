@@ -39,7 +39,60 @@ repos:
       pass_filenames: false
 
 - repo: https://github.com/PyCQA/bandit
-  rev: 1.8.3
+  rev: 1.9.4
   hooks:
     - id: bandit
       args: ["-c", "pyproject.toml"]
+
+- repo: https://github.com/PyCQA/flake8
+  rev: 7.3.0
+  hooks:
+    - id: flake8
+
+- repo: https://github.com/pylint-dev/pylint
+  rev: v4.0.6
+  hooks:
+    - id: pylint
+      additional_dependencies:
+        - streamlit
+        - python-dotenv
+        - langchain==0.3.25
+        - langchain-community
+        - langchain-core
+        - langchain-text-splitters
+        - langchain-huggingface
+        - langchain-ollama
+        - langchain-google-genai
+        - langchain-openai
+        - langchain-anthropic
+        - langchain-groq
+        - pymupdf4llm
+        - pymupdf
+        - pydantic
+
+- repo: https://github.com/asottile/pyupgrade
+  rev: v3.21.2
+  hooks:
+    - id: pyupgrade
+
+- repo: https://github.com/jendrikseipp/vulture
+  rev: v2.16
+  hooks:
+  - id: vulture
+    args: ["--min-confidence=50", "app.py", "utils/", "tests/"]
+    exclude: |
+      (^venv/.*)
+      |(^rag-chatbot-env/.*)
+      |(^\.venv/.*)
+      |(^\.git/.*)
+      |(^vectorstore/.*)
+      |(^__pycache__/.*)
+      |(^\.pytest_cache/.*)
+      |(^\.ruff_cache/.*)
+      |(^\.mypy_cache/.*)`
+
+- repo: https://github.com/returntocorp/semgrep
+  rev: v1.165.0
+  hooks:
+    - id: semgrep
+    

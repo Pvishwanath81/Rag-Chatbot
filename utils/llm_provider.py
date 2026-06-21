@@ -17,7 +17,9 @@ Supported providers:
     - Groq     -> langchain_groq.ChatGroq
 
 Public API:
-    build_llm(provider, model=None, api_key=None, temperature=0.3, base_url=...) -> BaseChatModel
+    build_llm(provider, model=None,
+    api_key=None, temperature=0.3,
+    base_url=...) -> BaseChatModel
     AVAILABLE_PROVIDERS      -> list[str]
     OLLAMA_MODELS            -> list[str]
     DEFAULT_CLOUD_MODELS     -> dict[str, str]
@@ -25,7 +27,13 @@ Public API:
 """
 
 import os
+from pydantic import SecretStr
 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 
 # ----- Provider / model catalogue ---------------------------------------------
 
@@ -112,8 +120,6 @@ def build_llm(
 
     # ----- Local: Ollama (no API key) -----
     if provider_key == "ollama":
-        from langchain_ollama import ChatOllama
-
         return ChatOllama(
             model=model or OLLAMA_MODELS[0],
             base_url=base_url,
@@ -129,11 +135,7 @@ def build_llm(
             f"or set the {PROVIDER_ENV_VARS.get(canonical_name)} environment variable."
         )
 
-    from pydantic import SecretStr
-
     if provider_key == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
         return ChatGoogleGenerativeAI(
             model=model or DEFAULT_CLOUD_MODELS["Gemini"],
             google_api_key=SecretStr(resolved_key),
@@ -141,8 +143,6 @@ def build_llm(
         )
 
     if provider_key == "openai":
-        from langchain_openai import ChatOpenAI
-
         return ChatOpenAI(
             model=model or DEFAULT_CLOUD_MODELS["OpenAI"],
             api_key=SecretStr(resolved_key),
@@ -150,8 +150,6 @@ def build_llm(
         )
 
     if provider_key == "claude":
-        from langchain_anthropic import ChatAnthropic
-
         # ChatAnthropic uses 'anthropic_model_name' parameter, not 'model'
         return ChatAnthropic(
             model_name=model or DEFAULT_CLOUD_MODELS["Claude"],
@@ -162,10 +160,10 @@ def build_llm(
         )
 
     if provider_key == "groq":
-        from langchain_groq import ChatGroq
-
         return ChatGroq(
             model=model or DEFAULT_CLOUD_MODELS["Groq"],
             api_key=SecretStr(resolved_key),
             temperature=temperature,
         )
+
+    raise ValueError(f"Unsupported provider after validation: {provider}")

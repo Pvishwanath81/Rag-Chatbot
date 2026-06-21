@@ -185,7 +185,7 @@ def build_current_llm():
 # ── Helper: process a PDF ────────────────────────────────────────────────────
 
 
-def process_pdf(uploaded_file):
+def process_pdf(pdf_file):
     """
     Full pipeline: PDF → documents → chunks → embeddings → FAISS → RAG chain.
     Updates session state and shows progress via Streamlit status widgets.
@@ -195,7 +195,7 @@ def process_pdf(uploaded_file):
     try:
         # Step 1: Load PDF
         progress_bar.progress(10, text="Reading PDF…")
-        documents = load_pdf_from_upload(uploaded_file)
+        documents = load_pdf_from_upload(pdf_file)
         meta = get_document_metadata(documents)
 
         # Step 2: Split into chunks
@@ -219,39 +219,35 @@ def process_pdf(uploaded_file):
         progress_bar.progress(
             95, text=f"Initialising {st.session_state.provider} model…"
         )
-        llm = build_current_llm()
-        rag_chain = build_rag_chain(vector_store, llm=llm)
+        llm_instance = build_current_llm()
+        rag_chain = build_rag_chain(vector_store, llm=llm_instance)
         st.session_state.llm_signature = current_llm_signature()
 
         # Save everything to session state
         st.session_state.vector_store = vector_store
         st.session_state.rag_chain = rag_chain
         st.session_state.pdf_processed = True
-        st.session_state.pdf_name = uploaded_file.name
+        st.session_state.pdf_name = pdf_file.name
         st.session_state.chat_history = []  # Reset chat on new PDF
         st.session_state.doc_stats = {**meta, **chunk_stats}
 
         progress_bar.progress(100, text="Done!")
-        st.success(f"✅ **{uploaded_file.name}** processed successfully!")
+        st.success(f"✅ **{pdf_file.name}** processed successfully!")
 
-    except Exception as e:
+    except Exception as exc:  # pylint: disable=broad-except
+        # Broad catch is intentional: PDF parsing, embedding, and FAISS each
+        # raise their own exception types, and any of them should surface as
+        # a friendly error in the UI rather than crashing the app.
         progress_bar.empty()
-        st.error(f"❌ Failed to process PDF: {str(e)}")
+        st.error(f"❌ Failed to process PDF: {exc}")
         raise
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Helper: provider/model selector (sidebar) ────────────────────────────────
 
-with st.sidebar:
-    st.markdown("## 🤖 RAG Chatbot")
-    st.markdown(
-        f"*Retrieval-Augmented Generation · FAISS · {st.session_state.provider}*"
-    )
-    st.divider()
 
-    # ---- Provider / Model Selection ----
-    st.markdown("### ⚙️ Answer Model")
-
+def render_provider_selector():
+    """Render the provider/model selection widgets and update session state."""
     provider = st.selectbox(
         "Provider",
         options=AVAILABLE_PROVIDERS,
@@ -296,9 +292,69 @@ with st.sidebar:
         if not api_key:
             st.warning(f"Enter your {provider} API key to use this provider.")
 
-    st.divider()
 
-    # ---- PDF Upload ----
+# ── Helper: chat input handling (main area) ──────────────────────────────────
+
+
+def handle_chat_input():
+    """Read the chat box, query the RAG chain, and update chat history."""
+    user_question = st.chat_input(
+        "Ask a question about your document…",
+        disabled=not st.session_state.pdf_processed,
+    )
+
+    if not user_question:
+        return
+
+    if not st.session_state.rag_chain:
+        st.error("No RAG chain available. Please process a PDF first.")
+        return
+
+    # If the user switched provider/model/API key since the chain was last
+    # built, rebuild it now — reusing the existing vector store and
+    # retriever as-is, only swapping the answering model.
+    chain_ready = True
+    if current_llm_signature() != st.session_state.llm_signature:
+        try:
+            llm = build_current_llm()
+            st.session_state.rag_chain = build_rag_chain(
+                st.session_state.vector_store, llm=llm
+            )
+            st.session_state.llm_signature = current_llm_signature()
+        except Exception as exc:  # pylint: disable=broad-except
+            st.error(f"⚠️ Could not switch to {st.session_state.provider}: {exc}")
+            chain_ready = False
+
+    if not chain_ready:
+        return
+
+    # Append user message immediately
+    st.session_state.chat_history.append({"role": "user", "content": user_question})
+
+    # Get answer from RAG chain with a spinner
+    with st.spinner("Searching document and generating answer…"):
+        try:
+            result = query_rag_chain(st.session_state.rag_chain, user_question)
+            answer = result["answer"]
+            sources = result["source_documents"]
+        except Exception as exc:  # pylint: disable=broad-except
+            answer = f"⚠️ Error generating answer: {exc}"
+            sources = []
+
+    # Append assistant message
+    st.session_state.chat_history.append(
+        {"role": "assistant", "content": answer, "sources": sources}
+    )
+
+    # Rerun to render the updated chat history
+    st.rerun()
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+
+
+def render_pdf_upload_section():
+    """Render the PDF uploader and trigger processing on a new file."""
     st.markdown("### 📄 Upload Document")
     uploaded_file = st.file_uploader(
         "Choose a PDF file",
@@ -306,64 +362,73 @@ with st.sidebar:
         help="Upload any PDF — research paper, manual, report, etc.",
     )
 
-    if uploaded_file is not None:
-        # Process only if it's a new file (avoids reprocessing on every rerun)
-        if uploaded_file.name != st.session_state.pdf_name:
-            if st.button("🔄 Process PDF", use_container_width=True, type="primary"):
-                process_pdf(uploaded_file)
+    if uploaded_file is None or uploaded_file.name == st.session_state.pdf_name:
+        return
 
-    st.divider()
+    # Process only if it's a new file (avoids reprocessing on every rerun)
+    if st.button("🔄 Process PDF", use_container_width=True, type="primary"):
+        process_pdf(uploaded_file)
 
-    # ---- Load Existing Index ----
+
+def render_saved_index_section():
+    """Render the 'load a previously saved FAISS index' control."""
     st.markdown("### 💾 Saved Index")
-    if vector_store_exists():
-        if st.button("📂 Load saved index", use_container_width=True):
-            try:
-                with st.spinner("Loading saved vector store…"):
-                    embedding_model = get_cached_embedding_model()
-                    vs = load_vector_store(embedding_model=embedding_model)
-                    llm = build_current_llm()
-                    st.session_state.vector_store = vs
-                    st.session_state.rag_chain = build_rag_chain(vs, llm=llm)
-                    st.session_state.llm_signature = current_llm_signature()
-                    st.session_state.pdf_processed = True
-                    st.session_state.pdf_name = "Saved index"
-                st.success("Index loaded!")
-            except Exception as e:
-                st.error(f"Could not load index: {e}")
-    else:
+    if not vector_store_exists():
         st.caption("No saved index found. Upload a PDF first.")
+        return
 
-    st.divider()
+    if not st.button("📂 Load saved index", use_container_width=True):
+        return
 
-    # ---- Document Stats ----
-    if st.session_state.pdf_processed and st.session_state.doc_stats:
-        st.markdown("### 📊 Document Stats")
-        stats = st.session_state.doc_stats
-        col1, col2 = st.columns(2)
-        col1.metric("Pages", stats.get("total_pages", "—"))
-        col2.metric("Chunks", stats.get("total_chunks", "—"))
-        st.caption(f"Avg chunk: {stats.get('avg_chunk_size', '—')} chars")
+    try:
+        with st.spinner("Loading saved vector store…"):
+            emb_model = get_cached_embedding_model()
+            vs = load_vector_store(embedding_model=emb_model)
+            loaded_llm = build_current_llm()
+            st.session_state.vector_store = vs
+            st.session_state.rag_chain = build_rag_chain(vs, llm=loaded_llm)
+            st.session_state.llm_signature = current_llm_signature()
+            st.session_state.pdf_processed = True
+            st.session_state.pdf_name = "Saved index"
+        st.success("Index loaded!")
+    except Exception as exc:  # pylint: disable=broad-except
+        st.error(f"Could not load index: {exc}")
 
-    st.divider()
 
-    # ---- Clear chat ----
-    if st.button("🗑️ Clear chat history", use_container_width=True):
-        st.session_state.chat_history = []
-        # Rebuild chain to reset LangChain's internal memory
-        if st.session_state.vector_store:
-            try:
-                llm = build_current_llm()
-                st.session_state.rag_chain = build_rag_chain(
-                    st.session_state.vector_store, llm=llm
-                )
-                st.session_state.llm_signature = current_llm_signature()
-            except Exception as e:
-                st.error(f"Could not rebuild chain: {e}")
-        st.rerun()
+def render_document_stats_section():
+    """Render page/chunk counters for the currently loaded document."""
+    if not (st.session_state.pdf_processed and st.session_state.doc_stats):
+        return
 
-    # ---- Status badge ----
-    st.divider()
+    st.markdown("### 📊 Document Stats")
+    stats = st.session_state.doc_stats
+    col1, col2 = st.columns(2)
+    col1.metric("Pages", stats.get("total_pages", "—"))
+    col2.metric("Chunks", stats.get("total_chunks", "—"))
+    st.caption(f"Avg chunk: {stats.get('avg_chunk_size', '—')} chars")
+
+
+def render_clear_chat_section():
+    """Render the 'clear chat history' button and reset LangChain memory."""
+    if not st.button("🗑️ Clear chat history", use_container_width=True):
+        return
+
+    st.session_state.chat_history = []
+    # Rebuild chain to reset LangChain's internal memory
+    if st.session_state.vector_store:
+        try:
+            rebuilt_llm = build_current_llm()
+            st.session_state.rag_chain = build_rag_chain(
+                st.session_state.vector_store, llm=rebuilt_llm
+            )
+            st.session_state.llm_signature = current_llm_signature()
+        except Exception as exc:  # pylint: disable=broad-except
+            st.error(f"Could not rebuild chain: {exc}")
+    st.rerun()
+
+
+def render_status_badge():
+    """Render the small 'active document' / 'no document' badge."""
     if st.session_state.pdf_processed:
         st.markdown(
             f'<span class="badge-green">● Active: {st.session_state.pdf_name}</span>',
@@ -376,94 +441,100 @@ with st.sidebar:
         )
 
 
+def render_sidebar():
+    """Render the sidebar: provider selection, PDF upload, saved index, stats."""
+    with st.sidebar:
+        st.markdown("## 🤖 RAG Chatbot")
+        st.markdown(
+            f"*Retrieval-Augmented Generation · FAISS · {st.session_state.provider}*"
+        )
+        st.divider()
+
+        st.markdown("### ⚙️ Answer Model")
+        render_provider_selector()
+        st.divider()
+
+        render_pdf_upload_section()
+        st.divider()
+
+        render_saved_index_section()
+        st.divider()
+
+        render_document_stats_section()
+        st.divider()
+
+        render_clear_chat_section()
+
+        st.divider()
+        render_status_badge()
+
+
 # ── Main Area ─────────────────────────────────────────────────────────────────
 
-st.markdown("# 💬 RAG Chatbot")
-st.markdown(
-    "Ask any question about your uploaded PDF. "
-    "Answers are grounded in the document's content."
-)
-st.divider()
 
-# ---- Render chat history ----
-chat_container = st.container()
-with chat_container:
-    if not st.session_state.chat_history:
-        if st.session_state.pdf_processed:
-            st.info("📝 Document loaded! Ask your first question below.")
-        else:
-            st.info("👈 Upload a PDF in the sidebar to get started.")
-    else:
-        for message in st.session_state.chat_history:
-            if message["role"] == "user":
-                st.markdown(
-                    f'<div class="user-bubble">🧑 {message["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+def render_chat_message(message):
+    """Render a single chat bubble (user or assistant), with sources if any."""
+    if message["role"] == "user":
+        st.markdown(
+            f'<div class="user-bubble">🧑 {message["content"]}</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        f'<div class="assistant-bubble">🤖 {message["content"]}</div>',
+        unsafe_allow_html=True,
+    )
+    if not message.get("sources"):
+        return
+
+    with st.expander("📎 Source references", expanded=False):
+        for i, src in enumerate(message["sources"], 1):
+            page = src.metadata.get("page", "?")
+            snippet = src.page_content[:200].replace("\n", " ")
+            st.markdown(
+                f'<div class="source-box">'
+                f"<b>Ref {i}</b> · Page {page + 1}<br>"
+                f"{snippet}…</div>",
+                unsafe_allow_html=True,
+            )
+
+
+def render_chat_history():
+    """Render the full chat history, or an empty-state hint if there is none."""
+    chat_container = st.container()
+    with chat_container:
+        if not st.session_state.chat_history:
+            if st.session_state.pdf_processed:
+                st.info("📝 Document loaded! Ask your first question below.")
             else:
-                st.markdown(
-                    f'<div class="assistant-bubble">🤖 {message["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
-                # Show source documents if available
-                if message.get("sources"):
-                    with st.expander("📎 Source references", expanded=False):
-                        for i, src in enumerate(message["sources"], 1):
-                            page = src.metadata.get("page", "?")
-                            snippet = src.page_content[:200].replace("\n", " ")
-                            st.markdown(
-                                f'<div class="source-box">'
-                                f"<b>Ref {i}</b> · Page {page + 1}<br>{snippet}…"
-                                f"</div>",
-                                unsafe_allow_html=True,
-                            )
+                st.info("👈 Upload a PDF in the sidebar to get started.")
+            return
 
-# ---- Chat input ----
-st.divider()
-user_question = st.chat_input(
-    "Ask a question about your document…",
-    disabled=not st.session_state.pdf_processed,
-)
+        for message in st.session_state.chat_history:
+            render_chat_message(message)
 
-if user_question:
-    if not st.session_state.rag_chain:
-        st.error("No RAG chain available. Please process a PDF first.")
-    else:
-        # If the user switched provider/model/API key since the chain was
-        # last built, rebuild it now — reusing the existing vector store
-        # and retriever as-is, only swapping the answering model.
-        chain_ready = True
-        if current_llm_signature() != st.session_state.llm_signature:
-            try:
-                llm = build_current_llm()
-                st.session_state.rag_chain = build_rag_chain(
-                    st.session_state.vector_store, llm=llm
-                )
-                st.session_state.llm_signature = current_llm_signature()
-            except Exception as e:
-                st.error(f"⚠️ Could not switch to {st.session_state.provider}: {e}")
-                chain_ready = False
 
-        if chain_ready:
-            # Append user message immediately
-            st.session_state.chat_history.append(
-                {"role": "user", "content": user_question}
-            )
+def render_main_area():
+    """Render the page header, chat history, and chat input box."""
+    st.markdown("# 💬 RAG Chatbot")
+    st.markdown(
+        "Ask any question about your uploaded PDF. "
+        "Answers are grounded in the document's content."
+    )
+    st.divider()
 
-            # Get answer from RAG chain with a spinner
-            with st.spinner("Searching document and generating answer…"):
-                try:
-                    result = query_rag_chain(st.session_state.rag_chain, user_question)
-                    answer = result["answer"]
-                    sources = result["source_documents"]
-                except Exception as e:
-                    answer = f"⚠️ Error generating answer: {str(e)}"
-                    sources = []
+    render_chat_history()
 
-            # Append assistant message
-            st.session_state.chat_history.append(
-                {"role": "assistant", "content": answer, "sources": sources}
-            )
+    st.divider()
+    handle_chat_input()
 
-            # Rerun to render the updated chat history
-            st.rerun()
+
+def main():
+    """Entry point: render the sidebar and main chat area."""
+    render_sidebar()
+    render_main_area()
+
+
+if __name__ == "__main__":
+    main()

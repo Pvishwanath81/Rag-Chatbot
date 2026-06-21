@@ -23,7 +23,7 @@ Public API is unchanged from the original version:
 """
 
 from typing import Any, cast
-from langchain.text_splitter import MarkdownTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter
 
 
 def split_documents(

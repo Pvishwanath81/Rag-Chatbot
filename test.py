@@ -1,9 +1,13 @@
-def reverse_string(s):
-    return s[::-1]
+"""Simple test module."""
 
 
-# Test the function
-test_string = "Hello, World!"
-result = reverse_string(test_string)
-print(f"Original: {test_string}")
-print(f"Reversed: {result}")
+def reverse_string(text):
+    """Return the reversed version of a string."""
+    return text[::-1]
+
+
+TEST_STRING = "Hello, World!"
+RESULT = reverse_string(TEST_STRING)
+
+print(f"Original: {TEST_STRING}")
+print(f"Reversed: {RESULT}")
