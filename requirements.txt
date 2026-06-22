@@ -14,5 +14,4 @@ sentence-transformers==4.1.0
 pymupdf4llm==0.0.17
 pymupdf==1.25.5
 python-dotenv==1.2.2
-transformers>=5.0.0
 langsmith==0.8.18
