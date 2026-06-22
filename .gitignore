@@ -3,3 +3,4 @@ vectorstore/
 __pycache__/
 .env
 *.zip
+uv.lock
