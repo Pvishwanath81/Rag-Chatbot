@@ -4,18 +4,19 @@ app.py
 Main Streamlit application for the RAG Chatbot.
 
 UI Flow:
-  1. User uploads a PDF in the sidebar.
-  2. App processes the PDF: loads → splits → embeds → stores in FAISS.
+  1. User uploads multiple documents (PDF, TXT, DOCX) in the sidebar.
+  2. App processes the documents: loads → splits → embeds → stores in FAISS.
   3. User types questions in the chat input.
   4. App queries the RAG chain and displays the answer + source references.
   5. Full chat history is shown in the main area.
 """
 
+import os
+import shutil
+import tempfile
 import streamlit as st
 from dotenv import load_dotenv
 
-from utils.pdf_loader import load_pdf_from_upload, get_document_metadata
-from utils.text_splitter import split_documents, get_chunk_stats
 from utils.embeddings import get_embedding_model
 from utils.vector_store import (
     create_vector_store,
@@ -23,7 +24,14 @@ from utils.vector_store import (
     load_vector_store,
     vector_store_exists,
 )
-from utils.rag_chain import build_rag_chain, query_rag_chain
+from utils.rag_chain import (
+    load_documents_from_uploads,
+    split_documents_by_type,
+    get_documents_metadata,
+    get_chunk_stats,
+    build_rag_chain,
+    query_rag_chain,
+)
 from utils.llm_provider import (
     build_llm,
     AVAILABLE_PROVIDERS,
@@ -123,11 +131,11 @@ if "rag_chain" not in st.session_state:
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None  # Loaded FAISS vector store
 
-if "pdf_processed" not in st.session_state:
-    st.session_state.pdf_processed = False  # Whether a PDF has been processed
+if "docs_processed" not in st.session_state:
+    st.session_state.docs_processed = False  # Whether documents have been processed
 
-if "pdf_name" not in st.session_state:
-    st.session_state.pdf_name = ""  # Filename of the processed PDF
+if "doc_names" not in st.session_state:
+    st.session_state.doc_names = []  # Filenames of the processed documents
 
 if "doc_stats" not in st.session_state:
     st.session_state.doc_stats = {}  # Metadata shown in the sidebar
@@ -182,40 +190,60 @@ def build_current_llm():
     )
 
 
-# ── Helper: process a PDF ────────────────────────────────────────────────────
+# ── Helper: process documents ────────────────────────────────────────────────
 
 
-def process_pdf(pdf_file):
+def process_documents(uploaded_files):
     """
-    Full pipeline: PDF → documents → chunks → embeddings → FAISS → RAG chain.
+    Full pipeline: documents → load → split → embeddings → FAISS → RAG chain.
+    Supports PDF, TXT, and DOCX files.
+
+    Args:
+        uploaded_files: List of (name, bytes_data) tuples where name is the
+                         original filename and bytes_data is the file content.
+
     Updates session state and shows progress via Streamlit status widgets.
     """
+    # pylint: disable=R0914
     progress_bar = st.progress(0, text="Starting…")
 
-    try:
-        # Step 1: Load PDF
-        progress_bar.progress(10, text="Reading PDF…")
-        documents = load_pdf_from_upload(pdf_file)
-        meta = get_document_metadata(documents)
+    temp_dir = tempfile.mkdtemp()
 
-        # Step 2: Split into chunks
+    try:
+        # Step 1: Write all uploaded files to temp files immediately
+        progress_bar.progress(5, text="Writing files to temp storage…")
+        temp_paths = []
+        for name, data in uploaded_files:
+            if not data:
+                raise ValueError(f"File {name} appears to be empty.")
+            tmp_path = os.path.join(temp_dir, name)
+            with open(tmp_path, "wb") as tmp_f:
+                tmp_f.write(data)
+            temp_paths.append((name, tmp_path))
+
+        # Step 2: Load documents from temp files
+        progress_bar.progress(10, text="Reading documents…")
+        documents = load_documents_from_uploads(temp_paths)
+        meta = get_documents_metadata(documents)
+
+        # Step 3: Split into chunks
         progress_bar.progress(30, text="Splitting text into chunks…")
-        chunks = split_documents(documents)
+        chunks = split_documents_by_type(documents)
         chunk_stats = get_chunk_stats(chunks)
 
-        # Step 3: Load embedding model
+        # Step 4: Load embedding model
         progress_bar.progress(50, text="Loading embedding model…")
         embedding_model = get_cached_embedding_model()
 
-        # Step 4: Build FAISS vector store
+        # Step 5: Build FAISS vector store
         progress_bar.progress(70, text="Building vector store…")
         vector_store = create_vector_store(chunks, embedding_model)
 
-        # Step 5: Save vector store to disk
+        # Step 6: Save vector store to disk
         progress_bar.progress(85, text="Saving index to disk…")
         save_vector_store(vector_store)
 
-        # Step 6: Build the LLM for the selected provider, then the RAG chain
+        # Step 7: Build the LLM for the selected provider, then the RAG chain
         progress_bar.progress(
             95, text=f"Initialising {st.session_state.provider} model…"
         )
@@ -226,21 +254,24 @@ def process_pdf(pdf_file):
         # Save everything to session state
         st.session_state.vector_store = vector_store
         st.session_state.rag_chain = rag_chain
-        st.session_state.pdf_processed = True
-        st.session_state.pdf_name = pdf_file.name
-        st.session_state.chat_history = []  # Reset chat on new PDF
+        st.session_state.docs_processed = True
+        st.session_state.doc_names = [name for name, _ in uploaded_files]
+        st.session_state.chat_history = []  # Reset chat on new documents
         st.session_state.doc_stats = {**meta, **chunk_stats}
 
         progress_bar.progress(100, text="Done!")
-        st.success(f"✅ **{pdf_file.name}** processed successfully!")
+        st.success(f"✅ **{len(uploaded_files)} file(s)** processed successfully!")
 
     except Exception as exc:  # pylint: disable=broad-except
-        # Broad catch is intentional: PDF parsing, embedding, and FAISS each
+        # Broad catch is intentional: document parsing, embedding, and FAISS each
         # raise their own exception types, and any of them should surface as
         # a friendly error in the UI rather than crashing the app.
         progress_bar.empty()
-        st.error(f"❌ Failed to process PDF: {exc}")
+        st.error(f"❌ Failed to process documents: {exc}")
         raise
+    finally:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ── Helper: provider/model selector (sidebar) ────────────────────────────────
@@ -299,15 +330,15 @@ def render_provider_selector():
 def handle_chat_input():
     """Read the chat box, query the RAG chain, and update chat history."""
     user_question = st.chat_input(
-        "Ask a question about your document…",
-        disabled=not st.session_state.pdf_processed,
+        "Ask a question about your documents…",
+        disabled=not st.session_state.docs_processed,
     )
 
     if not user_question:
         return
 
     if not st.session_state.rag_chain:
-        st.error("No RAG chain available. Please process a PDF first.")
+        st.error("No RAG chain available. Please process documents first.")
         return
 
     # If the user switched provider/model/API key since the chain was last
@@ -332,7 +363,7 @@ def handle_chat_input():
     st.session_state.chat_history.append({"role": "user", "content": user_question})
 
     # Get answer from RAG chain with a spinner
-    with st.spinner("Searching document and generating answer…"):
+    with st.spinner("Searching documents and generating answer…"):
         try:
             result = query_rag_chain(st.session_state.rag_chain, user_question)
             answer = result["answer"]
@@ -353,28 +384,45 @@ def handle_chat_input():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 
-def render_pdf_upload_section():
-    """Render the PDF uploader and trigger processing on a new file."""
-    st.markdown("### 📄 Upload Document")
-    uploaded_file = st.file_uploader(
-        "Choose a PDF file",
-        type=["pdf"],
-        help="Upload any PDF — research paper, manual, report, etc.",
+def render_document_upload_section():
+    """Render the document uploader and trigger processing on new files."""
+    st.markdown("### 📄 Upload Documents")
+    uploaded_files = st.file_uploader(
+        "Choose files (PDF, TXT, DOCX)",
+        type=["pdf", "txt", "docx"],
+        accept_multiple_files=True,
+        help="Upload one or more documents in PDF, TXT, or DOCX format.",
     )
 
-    if uploaded_file is None or uploaded_file.name == st.session_state.pdf_name:
+    if not uploaded_files:
         return
 
-    # Process only if it's a new file (avoids reprocessing on every rerun)
-    if st.button("🔄 Process PDF", use_container_width=True, type="primary"):
-        process_pdf(uploaded_file)
+    # Capture file bytes into session state immediately on every render.
+    # Streamlit reruns the script on every interaction, and by the time the
+    # button callback runs, the UploadedFile objects may be stale.
+    # We store raw (name, bytes) tuples and recreate temp files when needed.
+    captured = []
+    for f in uploaded_files:
+        f.seek(0)
+        data = f.read()
+        if data:
+            captured.append((f.name, data))
+    if captured:
+        st.session_state.pending_uploads = captured
+
+    if st.button("🔄 Process Documents", use_container_width=True, type="primary"):
+        pending = st.session_state.get("pending_uploads")
+        if not pending:
+            st.warning("No file data captured. Please re-upload the files.")
+            return
+        process_documents(pending)
 
 
 def render_saved_index_section():
     """Render the 'load a previously saved FAISS index' control."""
     st.markdown("### 💾 Saved Index")
     if not vector_store_exists():
-        st.caption("No saved index found. Upload a PDF first.")
+        st.caption("No saved index found. Upload documents first.")
         return
 
     if not st.button("📂 Load saved index", use_container_width=True):
@@ -388,24 +436,37 @@ def render_saved_index_section():
             st.session_state.vector_store = vs
             st.session_state.rag_chain = build_rag_chain(vs, llm=loaded_llm)
             st.session_state.llm_signature = current_llm_signature()
-            st.session_state.pdf_processed = True
-            st.session_state.pdf_name = "Saved index"
+            st.session_state.docs_processed = True
+            st.session_state.doc_names = ["Saved index"]
         st.success("Index loaded!")
     except Exception as exc:  # pylint: disable=broad-except
         st.error(f"Could not load index: {exc}")
 
 
 def render_document_stats_section():
-    """Render page/chunk counters for the currently loaded document."""
-    if not (st.session_state.pdf_processed and st.session_state.doc_stats):
+    """Render document stats for the currently loaded documents."""
+    if not (st.session_state.docs_processed and st.session_state.doc_stats):
         return
 
     st.markdown("### 📊 Document Stats")
     stats = st.session_state.doc_stats
-    col1, col2 = st.columns(2)
-    col1.metric("Pages", stats.get("total_pages", "—"))
-    col2.metric("Chunks", stats.get("total_chunks", "—"))
+
+    # Multi-file metrics
+    total_files = stats.get("total_files", 0)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Files", total_files)
+    col2.metric("Pages", stats.get("total_pages", "—"))
+    col3.metric("Chunks", stats.get("total_chunks", "—"))
+
     st.caption(f"Avg chunk: {stats.get('avg_chunk_size', '—')} chars")
+
+    # Show file type breakdown if multiple types
+    file_types = stats.get("file_types", {})
+    if file_types:
+        type_str = " · ".join(
+            [f"{ext.upper()}: {count}" for ext, count in file_types.items()]
+        )
+        st.caption(f"📁 {type_str}")
 
 
 def render_clear_chat_section():
@@ -428,21 +489,27 @@ def render_clear_chat_section():
 
 
 def render_status_badge():
-    """Render the small 'active document' / 'no document' badge."""
-    if st.session_state.pdf_processed:
+    """Render the small 'active documents' / 'no documents' badge."""
+    if st.session_state.docs_processed:
+        doc_count = len(st.session_state.doc_names)
+        label = f"● {doc_count} document(s) loaded"
         st.markdown(
-            f'<span class="badge-green">● Active: {st.session_state.pdf_name}</span>',
+            f'<span class="badge-green">{label}</span>',
             unsafe_allow_html=True,
         )
+        # Show list of file names
+        if st.session_state.doc_names != ["Saved index"]:
+            for name in st.session_state.doc_names:
+                st.caption(f"📄 {name}")
     else:
         st.markdown(
-            '<span class="badge-grey">○ No document loaded</span>',
+            '<span class="badge-grey">○ No documents loaded</span>',
             unsafe_allow_html=True,
         )
 
 
 def render_sidebar():
-    """Render the sidebar: provider selection, PDF upload, saved index, stats."""
+    """Render the sidebar: provider selection, document upload, saved index, stats."""
     with st.sidebar:
         st.markdown("## 🤖 RAG Chatbot")
         st.markdown(
@@ -454,7 +521,7 @@ def render_sidebar():
         render_provider_selector()
         st.divider()
 
-        render_pdf_upload_section()
+        render_document_upload_section()
         st.divider()
 
         render_saved_index_section()
@@ -491,10 +558,11 @@ def render_chat_message(message):
     with st.expander("📎 Source references", expanded=False):
         for i, src in enumerate(message["sources"], 1):
             page = src.metadata.get("page", "?")
+            source_name = src.metadata.get("source", "Unknown")
             snippet = src.page_content[:200].replace("\n", " ")
             st.markdown(
                 f'<div class="source-box">'
-                f"<b>Ref {i}</b> · Page {page + 1}<br>"
+                f"<b>Ref {i}</b> · {source_name} · Page {page + 1}<br>"
                 f"{snippet}…</div>",
                 unsafe_allow_html=True,
             )
@@ -505,10 +573,12 @@ def render_chat_history():
     chat_container = st.container()
     with chat_container:
         if not st.session_state.chat_history:
-            if st.session_state.pdf_processed:
-                st.info("📝 Document loaded! Ask your first question below.")
+            if st.session_state.docs_processed:
+                st.info("📝 Documents loaded! Ask your first question below.")
             else:
-                st.info("👈 Upload a PDF in the sidebar to get started.")
+                st.info(
+                    "👈 Upload documents (PDF, TXT, DOCX) in the sidebar to get started."
+                )
             return
 
         for message in st.session_state.chat_history:
@@ -519,8 +589,9 @@ def render_main_area():
     """Render the page header, chat history, and chat input box."""
     st.markdown("# 💬 RAG Chatbot")
     st.markdown(
-        "Ask any question about your uploaded PDF. "
-        "Answers are grounded in the document's content."
+        "Ask any question about your uploaded documents. "
+        "Answers are grounded in the documents' content. "
+        "Supports **PDF**, **TXT**, and **DOCX** files."
     )
     st.divider()
 

@@ -3,12 +3,15 @@ repos:
   rev: v0.15.18
   hooks:
     - id: ruff
+      exclude: ^\.vulture_whitelist\.py$
     - id: ruff-format
+      exclude: ^\.vulture_whitelist\.py$
 
 - repo: https://github.com/pre-commit/mirrors-mypy
   rev: v2.1.0
   hooks:
     - id: mypy
+      exclude: ^\.vulture_whitelist\.py$
 
 - repo: local
   hooks:
@@ -42,11 +45,13 @@ repos:
   rev: 7.3.0
   hooks:
     - id: flake8
+      exclude: ^\.vulture_whitelist\.py$
 
 - repo: https://github.com/pylint-dev/pylint
   rev: v4.0.6
   hooks:
     - id: pylint
+      exclude: ^\.vulture_whitelist\.py$
       additional_dependencies:
         - streamlit
         - python-dotenv
@@ -74,7 +79,7 @@ repos:
   rev: v2.16
   hooks:
     - id: vulture
-      args: ["--min-confidence=50", "app.py", "utils/", "tests/"]
+      args: ["--min-confidence=50", ".vulture_whitelist.py", "app.py", "utils/", "tests/"]
       exclude: |
         (^venv/.*)
         |(^rag-chatbot-env/.*)

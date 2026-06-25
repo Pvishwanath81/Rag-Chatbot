@@ -24,6 +24,7 @@ Public API is unchanged from the original version:
 
 from typing import Any, cast
 from langchain_text_splitters import MarkdownTextSplitter
+from utils.chunk_stats_helper import get_base_chunk_statistics
 
 
 def split_documents(
@@ -82,10 +83,4 @@ def get_chunk_stats(chunks: list) -> dict:
     if not chunks:
         return {"total_chunks": 0}
 
-    sizes = [len(chunk.page_content) for chunk in chunks]
-    return {
-        "total_chunks": len(chunks),
-        "min_chunk_size": min(sizes),
-        "max_chunk_size": max(sizes),
-        "avg_chunk_size": sum(sizes) // len(sizes),
-    }
+    return get_base_chunk_statistics(chunks)
